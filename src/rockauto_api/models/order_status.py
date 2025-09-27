@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import List, Optional, Union
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class OrderItem(BaseModel):
@@ -64,7 +64,8 @@ class OrderStatus(BaseModel):
     return_eligibility: bool = Field(default=False, description="Whether order is eligible for returns")
     last_updated: Optional[str] = Field(None, description="When status was last updated")
 
-    @validator('order_number')
+    @field_validator('order_number')
+    @classmethod
     def validate_order_number(cls, v):
         """Validate order number format."""
         if not v or not v.isdigit():
@@ -102,7 +103,8 @@ class OrderLookupRequest(BaseModel):
     email_or_phone: str = Field(..., description="Customer email address or phone number")
     order_number: str = Field(..., description="RockAuto order number")
 
-    @validator('order_number')
+    @field_validator('order_number')
+    @classmethod
     def validate_order_number(cls, v):
         """Validate order number format."""
         if not v or not v.isdigit():
@@ -111,7 +113,8 @@ class OrderLookupRequest(BaseModel):
             raise ValueError("Order number cannot exceed 12 digits")
         return v
 
-    @validator('email_or_phone')
+    @field_validator('email_or_phone')
+    @classmethod
     def validate_email_or_phone(cls, v):
         """Basic validation for email or phone format."""
         if not v or len(v.strip()) == 0:
@@ -127,14 +130,16 @@ class OrderListRequest(BaseModel):
     method: str = Field(..., description="Delivery method: 'email' or 'sms'")
     contact: str = Field(..., description="Email address or phone number")
 
-    @validator('method')
+    @field_validator('method')
+    @classmethod
     def validate_method(cls, v):
         """Validate delivery method."""
         if v.lower() not in ['email', 'sms']:
             raise ValueError("Method must be 'email' or 'sms'")
         return v.lower()
 
-    @validator('contact')
+    @field_validator('contact')
+    @classmethod
     def validate_contact(cls, v):
         """Validate contact information."""
         if not v or len(v.strip()) == 0:

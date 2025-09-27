@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class OrderHistoryFilter(BaseModel):
@@ -13,7 +13,8 @@ class OrderHistoryFilter(BaseModel):
     part_category: str = Field(default="All", description="Part category filter")
     part_number: Optional[str] = Field(None, description="Part number wildcard search")
 
-    @validator('date_range')
+    @field_validator('date_range')
+    @classmethod
     def validate_date_range(cls, v):
         """Validate date range options."""
         valid_ranges = ["1 Month", "3 Months", "6 Months", "9 Months", "1 Year", "2 Years", "All"]
@@ -65,7 +66,8 @@ class ExternalOrderRequest(BaseModel):
     email_or_phone: str = Field(..., description="Email address or phone number from external order")
     order_number: str = Field(..., description="Order number to add")
 
-    @validator('order_number')
+    @field_validator('order_number')
+    @classmethod
     def validate_order_number(cls, v):
         """Validate order number format."""
         if not v or not v.isdigit():
@@ -74,7 +76,8 @@ class ExternalOrderRequest(BaseModel):
             raise ValueError("Order number cannot exceed 12 digits")
         return v
 
-    @validator('email_or_phone')
+    @field_validator('email_or_phone')
+    @classmethod
     def validate_email_or_phone(cls, v):
         """Basic validation for email or phone format."""
         if not v or len(v.strip()) == 0:

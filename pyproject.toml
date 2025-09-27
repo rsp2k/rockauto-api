@@ -11,7 +11,7 @@ authors = [
     { name = "rsp2k", email = "ryan@supported.systems" }
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -50,7 +50,7 @@ test = [
 
 [project.urls]
 Homepage = "https://github.com/rsp2k/rockauto-api"
-Documentation = "https://rockauto-api.readthedocs.io"
+Documentation = "https://github.com/rsp2k/rockauto-api#readme"
 Repository = "https://github.com/rsp2k/rockauto-api.git"
 Issues = "https://github.com/rsp2k/rockauto-api/issues"
 
@@ -155,4 +155,9 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
+]
+
+[dependency-groups]
+dev = [
+    "twine>=6.1.0",
 ]
