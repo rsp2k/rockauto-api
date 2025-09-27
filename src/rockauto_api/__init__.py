@@ -4,7 +4,7 @@ RockAuto API Client
 A comprehensive Python API client for searching automotive parts on RockAuto.com
 """
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 from .client import RockAutoClient, Vehicle
 from .models import (

@@ -308,29 +308,86 @@ class RockAutoClient(BaseClient):
                 html_content = result["html_fill_sections"]["navchildren[]"]
                 soup = BeautifulSoup(html_content, "html.parser")
 
-                # Look for structured part data
-                for item in soup.find_all(
-                    ["div", "tr", "a"], class_=re.compile(r"part|product|item", re.I)
-                ):
-                    part_info = PartExtractor.extract_from_element(item)
-                    if part_info:
-                        parts.append(part_info)
+                # First, check if this looks like subcategories rather than actual parts
+                subcategory_links = []
+                navlabel_links = soup.find_all("a", class_="navlabellink")
 
-                        # Cache individual parts if caching enabled
-                        if self._part_cache and self.cache_config.enabled:
-                            self._part_cache.cache_part(part_info)
+                for link in navlabel_links:
+                    href = link.get("href", "")
+                    text = link.get_text(strip=True)
 
-                # Fallback parsing - look for links with meaningful text
+                    # This looks like a subcategory if it has a catalog URL but no price info
+                    if href and "catalog" in href and text and not any(
+                        price_indicator in link.get_text() for price_indicator in ["$", "Price:", "USD"]
+                    ):
+                        subcategory_links.append((text, href))
+
+                # If we found subcategory links, drill down into them to get actual parts
+                if subcategory_links and len(subcategory_links) > 0:
+                    for subcategory_name, subcategory_url in subcategory_links:
+                        try:
+                            subcategory_parts = await self.get_individual_parts_from_subcategory(
+                                make, year, model, carcode, subcategory_url
+                            )
+
+                            # Add subcategory name to each part for context
+                            for part in subcategory_parts.parts:
+                                # Create enhanced part with subcategory context
+                                enhanced_part = PartInfo(
+                                    name=f"{subcategory_name} - {part.name}" if part.name != "Unknown Part" else subcategory_name,
+                                    part_number=part.part_number,
+                                    price=part.price,
+                                    brand=part.brand,
+                                    url=part.url,
+                                    image_url=part.image_url,
+                                    info_url=part.info_url,
+                                    video_url=part.video_url,
+                                )
+                                parts.append(enhanced_part)
+
+                                # Cache individual parts if caching enabled
+                                if self._part_cache and self.cache_config.enabled:
+                                    self._part_cache.cache_part(enhanced_part)
+
+                        except Exception as e:
+                            # If subcategory drilling fails, fall back to treating it as a basic part
+                            fallback_part = PartInfo(
+                                name=subcategory_name,
+                                part_number="Unknown",
+                                price=None,
+                                brand=None,
+                                url=f"https://www.rockauto.com{subcategory_url}" if subcategory_url.startswith("/") else subcategory_url,
+                                image_url=None,
+                                info_url=None,
+                                video_url=None,
+                            )
+                            parts.append(fallback_part)
+
+                # If no subcategories found, use original parsing logic
                 if not parts:
-                    links = soup.find_all("a", href=True)
-                    for link in links:
-                        part_info = PartExtractor.extract_from_element(link)
-                        if part_info and part_info.name not in [p.name for p in parts]:
+                    # Look for structured part data
+                    for item in soup.find_all(
+                        ["div", "tr", "a"], class_=re.compile(r"part|product|item", re.I)
+                    ):
+                        part_info = PartExtractor.extract_from_element(item)
+                        if part_info:
                             parts.append(part_info)
 
                             # Cache individual parts if caching enabled
                             if self._part_cache and self.cache_config.enabled:
                                 self._part_cache.cache_part(part_info)
+
+                    # Fallback parsing - look for links with meaningful text
+                    if not parts:
+                        links = soup.find_all("a", href=True)
+                        for link in links:
+                            part_info = PartExtractor.extract_from_element(link)
+                            if part_info and part_info.name not in [p.name for p in parts]:
+                                parts.append(part_info)
+
+                                # Cache individual parts if caching enabled
+                                if self._part_cache and self.cache_config.enabled:
+                                    self._part_cache.cache_part(part_info)
 
             vehicle_result = VehiclePartsResult(
                 make=make.upper(),
@@ -357,47 +414,75 @@ class RockAutoClient(BaseClient):
     async def get_individual_parts_from_subcategory(
         self, make: str, year: int, model: str, carcode: str, subcategory_url: str
     ) -> VehiclePartsResult:
-        """Get individual parts from a subcategory URL using web scraping."""
+        """Get individual parts from a subcategory using API-based approach to avoid CAPTCHA."""
         try:
-            # Ensure we have a full URL
-            if not subcategory_url.startswith("http"):
-                if subcategory_url.startswith("/"):
-                    full_url = f"https://www.rockauto.com{subcategory_url}"
-                else:
-                    full_url = f"https://www.rockauto.com/{subcategory_url}"
-            else:
-                full_url = subcategory_url
-
-            # Parse the URL to extract category name
+            # Parse the URL to extract part type and category information
             url_parts = subcategory_url.strip("/").split(",")
             category_name = "Unknown"
-            if len(url_parts) >= 7:
+            part_type = None
+
+            if len(url_parts) >= 8:
+                category_name = url_parts[6].replace("+", " ")
+                part_type = url_parts[7]  # The numeric part type ID
+            elif len(url_parts) >= 7:
                 category_name = url_parts[6].replace("+", " ")
 
-            # Fetch the web page
-            response = await self.session.get(full_url)
-            response.raise_for_status()
+            # If we don't have a part type, fall back to basic category info
+            if not part_type:
+                return VehiclePartsResult(
+                    make=make.upper(),
+                    year=year,
+                    model=model.upper(),
+                    carcode=carcode,
+                    category=category_name,
+                    parts=[],
+                    count=0,
+                )
 
-            soup = BeautifulSoup(response.text, "html.parser")
+            # Use API to get individual parts for this specific part type
+            payload = {
+                "jsn": {
+                    "carcode": carcode,
+                    "parttype": part_type,
+                    "tab": "catalog",
+                    "idepth": 8,  # Deep enough to get individual parts
+                    "nodetype": "parttype",
+                    "jsdata": {
+                        "markets": [{"c": "US"}, {"c": "CA"}],
+                        "mktlist": "US,CA",
+                        "Show": 1,
+                    },
+                }
+            }
+
+            result = await self._make_api_request("navnode_fetch", payload)
             parts = []
 
-            # Look for tables containing parts data
-            tables = soup.find_all("table")
+            if "html_fill_sections" in result and "navchildren[]" in result["html_fill_sections"]:
+                html_content = result["html_fill_sections"]["navchildren[]"]
+                soup = BeautifulSoup(html_content, "html.parser")
 
-            for table in tables:
-                rows = table.find_all("tr")
-
+                # Look for table rows that contain actual part data with prices
+                rows = soup.find_all("tr")
                 for row in rows:
                     row_text = row.get_text(strip=True)
 
-                    # Look for rows with price information (likely parts)
+                    # Look for rows with price information (indicates actual parts)
                     if "$" in row_text and len(row_text) > 20:
                         cells = row.find_all(["td", "th"])
 
-                        if len(cells) >= 3:  # Likely a part row with multiple columns
-                            part_info = await self._extract_part_from_table_row(row, cells)
-                            if part_info:
+                        if len(cells) >= 3:  # Multi-column table row
+                            part_info = PartExtractor.extract_from_table_row(row, cells)
+                            if part_info and (part_info.price or part_info.part_number != "Unknown"):
                                 parts.append(part_info)
+
+                # If no parts found with price info, look for any structured content
+                if not parts:
+                    # Look for any elements with class patterns that might contain part info
+                    for item in soup.find_all(["div", "span", "a"], class_=re.compile(r"part|product|price|brand", re.I)):
+                        part_info = PartExtractor.extract_from_element(item)
+                        if part_info and part_info.name not in [p.name for p in parts]:
+                            parts.append(part_info)
 
             return VehiclePartsResult(
                 make=make.upper(),
@@ -410,7 +495,16 @@ class RockAutoClient(BaseClient):
             )
 
         except Exception as e:
-            raise Exception(f"Failed to fetch individual parts from subcategory: {str(e)}")
+            # On any error, return empty result rather than failing completely
+            return VehiclePartsResult(
+                make=make.upper(),
+                year=year,
+                model=model.upper(),
+                carcode=carcode,
+                category="Unknown",
+                parts=[],
+                count=0,
+            )
 
     async def _extract_part_from_table_row(self, row, cells) -> Optional["PartInfo"]:
         """Extract part information from a table row with detailed parsing."""
