@@ -14,38 +14,39 @@ class BaseClient:
         self.API_ENDPOINT = "https://www.rockauto.com/catalog/catalogapi.php"
         self.CATALOG_BASE = "https://www.rockauto.com/en/catalog"
 
-        # Create HTTP session with modern browser headers
+        # Create HTTP session with real desktop browser headers (based on Playwright analysis)
         self.session = httpx.AsyncClient(
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "application/json, text/javascript, */*; q=0.01",
+                # Match real Chrome 139 browser signature from Playwright
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                 "Accept-Language": "en-US,en;q=0.9",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "X-Requested-With": "XMLHttpRequest",
-                "Referer": "https://www.rockauto.com/",
-                "Origin": "https://www.rockauto.com",
-                "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                "Accept-Encoding": "gzip, deflate, br, zstd",
+                "Sec-Ch-Ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
                 "Sec-Ch-Ua-Mobile": "?0",
-                "Sec-Ch-Ua-Platform": '"Windows"',
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-origin",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache"
+                "Sec-Ch-Ua-Platform": '"Linux"',
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+                "Cache-Control": "max-age=0"
             },
             timeout=30.0,
+            follow_redirects=True,  # Handle 302 redirects automatically
+            cookies=httpx.Cookies()  # Use httpx's built-in cookie jar
         )
 
-        # Required cookies for RockAuto API
-        self.cookies = {
-            "idlist": "0",
-            "mkt_CA": "false",
-            "mkt_MX": "false",
-            "year_2005": "true",
-            "ck": "1",
-            "mkt_US": "true",
-        }
+        # Set required initial cookies for RockAuto API
+        self.session.cookies.set("idlist", "0", domain="www.rockauto.com")
+        self.session.cookies.set("mkt_CA", "false", domain="www.rockauto.com")
+        self.session.cookies.set("mkt_MX", "false", domain="www.rockauto.com")
+        self.session.cookies.set("year_2005", "true", domain="www.rockauto.com")
+        self.session.cookies.set("ck", "1", domain="www.rockauto.com")
+        self.session.cookies.set("mkt_US", "true", domain="www.rockauto.com")
+
+        # Keep backward compatibility with legacy cookies dict for troubleshooting
+        self.cookies = dict(self.session.cookies)
 
         # Authentication state
         self.is_authenticated = False
@@ -107,14 +108,12 @@ class BaseClient:
             response = await self.session.post(
                 self.API_ENDPOINT,
                 data=form_data,
-                headers=headers,
-                cookies=self.cookies
+                headers=headers
             )
             response.raise_for_status()
 
-            # Update session cookies from response
-            if response.cookies:
-                self.cookies.update(dict(response.cookies))
+            # Update legacy cookies dict for backward compatibility
+            self.cookies = dict(self.session.cookies)
 
             # Parse JSON response to check for login success
             try:
@@ -144,7 +143,7 @@ class BaseClient:
                     self.user_email = None
                     return False
 
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError):
                 # If JSON parsing fails, fall back to text analysis
                 response_text = response.text.lower()
                 if "log in successful" in response_text:
@@ -185,8 +184,7 @@ class BaseClient:
             response = await self.session.post(
                 self.API_ENDPOINT,
                 data=form_data,
-                headers=headers,
-                cookies=self.cookies
+                headers=headers
             )
             response.raise_for_status()
 
@@ -194,11 +192,14 @@ class BaseClient:
             self.is_authenticated = False
             self.user_email = None
 
-            # Clear authentication cookies
+            # Clear authentication cookies from session
             auth_cookies_to_clear = ["session", "login", "auth", "user"]
-            for cookie_name in list(self.cookies.keys()):
+            for cookie_name in list(self.session.cookies.keys()):
                 if any(auth_key in cookie_name.lower() for auth_key in auth_cookies_to_clear):
-                    del self.cookies[cookie_name]
+                    self.session.cookies.delete(cookie_name, domain="www.rockauto.com")
+
+            # Update legacy cookies dict for backward compatibility
+            self.cookies = dict(self.session.cookies)
 
             return True
 
@@ -230,7 +231,18 @@ class BaseClient:
                 "curCartGroupID": "",
             }
 
-            response = await self.session.post(self.API_ENDPOINT, data=data, cookies=self.cookies)
+            # Use AJAX-specific headers for API requests (based on Playwright analysis)
+            api_headers = {
+                "Accept": "text/plain, */*; q=0.01",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://www.rockauto.com/",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin"
+            }
+
+            response = await self.session.post(self.API_ENDPOINT, data=data, headers=api_headers)
             response.raise_for_status()
 
             return response.json()

@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from bs4 import BeautifulSoup
 
@@ -1406,6 +1406,10 @@ class RockAutoClient(BaseClient):
             # Update item count
             order_status.item_count = len(order_status.items)
 
+            # Validate that this is real order data vs massive JS localization
+            if not self._is_real_order_data(order_status, order_number):
+                return None
+
             return order_status
 
         except Exception:
@@ -1617,6 +1621,50 @@ class RockAutoClient(BaseClient):
         except Exception:
             return "Unknown error occurred"
 
+    def _is_real_order_data(self, order_status: OrderStatus, order_number: str) -> bool:
+        """Detect if order contains real data vs massive JS localization strings."""
+        if not order_status:
+            return False
+
+        # Check if essential fields contain reasonable data vs huge JS objects
+        status = getattr(order_status, 'status', '')
+        order_date = getattr(order_status, 'order_date', '')
+
+        # If status field is massive (>1000 chars), it's likely JS localization
+        if len(str(status)) > 1000:
+            return False
+
+        # If order_date is massive, it's likely JS localization
+        if order_date and len(str(order_date)) > 1000:
+            return False
+
+        # If order_number doesn't match what we searched for, likely localization
+        actual_order_num = getattr(order_status, 'order_number', '')
+        if actual_order_num and str(actual_order_num) != str(order_number):
+            return False
+
+        # Check if we have meaningful item count or billing info
+        item_count = getattr(order_status, 'item_count', 0)
+        has_billing = hasattr(order_status, 'billing') and order_status.billing
+
+        # Real orders should have either items or billing info, but not fake items
+        # Fake items are usually created from JS localization data
+        if item_count > 0:
+            # Check if items look real vs generated from localization
+            if hasattr(order_status, 'items') and order_status.items:
+                first_item = order_status.items[0]
+                # Check if item data looks real
+                item_desc = getattr(first_item, 'description', '')
+                item_brand = getattr(first_item, 'brand', '')
+                if len(str(item_desc)) > 500 or len(str(item_brand)) > 500:
+                    return False  # Likely JS localization in items too
+
+        # If we have a reasonable status, date, and items, it's probably real
+        return (
+            item_count > 0 or has_billing or
+            (len(str(status)) < 100 and status.lower() not in ['unknown', ''])
+        )
+
     # === AUTHENTICATED ACCOUNT METHODS ===
 
     async def add_external_order(self, email_or_phone: str, order_number: str) -> bool:
@@ -1674,8 +1722,7 @@ class RockAutoClient(BaseClient):
             add_response = await self.session.post(
                 "https://www.rockauto.com/en/accountactivity/",
                 data=form_data,
-                headers=headers,
-                cookies=self.cookies
+                headers=headers
             )
             add_response.raise_for_status()
 
@@ -1728,8 +1775,7 @@ class RockAutoClient(BaseClient):
 
             response = await self.session.get(
                 "https://www.rockauto.com/en/profile/",
-                headers=headers,
-                cookies=self.cookies
+                headers=headers
             )
             response.raise_for_status()
 
@@ -1850,8 +1896,7 @@ class RockAutoClient(BaseClient):
 
             response = await self.session.get(
                 "https://www.rockauto.com/en/profile/",
-                headers=headers,
-                cookies=self.cookies
+                headers=headers
             )
             response.raise_for_status()
 
@@ -1972,8 +2017,7 @@ class RockAutoClient(BaseClient):
 
             response = await self.session.get(
                 "https://www.rockauto.com/en/accountactivity/",
-                headers=headers,
-                cookies=self.cookies
+                headers=headers
             )
             response.raise_for_status()
 
@@ -2038,8 +2082,7 @@ class RockAutoClient(BaseClient):
 
             response = await self.session.get(
                 "https://www.rockauto.com/en/orderhistory/",
-                headers=headers,
-                cookies=self.cookies
+                headers=headers
             )
             response.raise_for_status()
 
@@ -2081,7 +2124,7 @@ class RockAutoClient(BaseClient):
                                 )
                                 orders.append(order)
 
-                        except Exception as e:
+                        except Exception:
                             # Skip invalid order rows
                             continue
 
