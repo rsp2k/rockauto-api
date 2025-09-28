@@ -1,7 +1,8 @@
 """Models for caching Part and PartInfo objects."""
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
+
 from pydantic import BaseModel, Field
 
 from .part_info import PartInfo

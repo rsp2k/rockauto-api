@@ -27,14 +27,13 @@ from .order_status import (
     ShippingInfo,
 )
 from .part_cache import (
+    CacheConfiguration,
     CachedPartInfo,
     CachedVehiclePartsResult,
-    CacheConfiguration,
     PartCache,
 )
 from .part_category import PartCategory
-from .part_info import PartInfo
-from .part_search_result import PartSearchResult
+from .part_info import PartInfo, PartWithHistory
 from .part_search_options import (
     ManufacturerOptions,
     PartGroupOptions,
@@ -43,9 +42,10 @@ from .part_search_options import (
     WhatIsPartCalledResult,
     WhatIsPartCalledResults,
 )
-from .tool_category import ToolCategory
-from .tool_info import ToolInfo
+from .part_search_result import PartSearchResult
 from .tool_categories import ToolCategories
+from .tool_category import ToolCategory
+from .tool_info import ToolInfo, ToolWithHistory
 from .tools_result import ToolsResult
 from .vehicle_engines import VehicleEngines
 from .vehicle_makes import VehicleMakes
@@ -53,6 +53,8 @@ from .vehicle_models import VehicleModels
 from .vehicle_part_categories import VehiclePartCategories
 from .vehicle_parts_result import VehiclePartsResult
 from .vehicle_years import VehicleYears
+from .price_info import PriceInfo, PriceStockSnapshot, PartWithPricing, ToolWithPricing
+from .enhanced_cache import EnhancedPartCache, StaticPartCache, PricingCache
 
 __all__ = [
     "AccountActivityResult",
@@ -76,6 +78,7 @@ __all__ = [
     "PartCategory",
     "PartGroupOptions",
     "PartInfo",
+    "PartWithHistory",
     "PartSearchOption",
     "PartSearchResult",
     "PartTypeOptions",
@@ -86,6 +89,7 @@ __all__ = [
     "ShippingInfo",
     "ToolCategory",
     "ToolInfo",
+    "ToolWithHistory",
     "ToolCategories",
     "ToolsResult",
     "VehicleEngines",
@@ -96,4 +100,12 @@ __all__ = [
     "VehicleYears",
     "WhatIsPartCalledResult",
     "WhatIsPartCalledResults",
+    # New pricing and enhanced cache models
+    "PriceInfo",
+    "PriceStockSnapshot",
+    "PartWithPricing",
+    "ToolWithPricing",
+    "EnhancedPartCache",
+    "StaticPartCache",
+    "PricingCache",
 ]

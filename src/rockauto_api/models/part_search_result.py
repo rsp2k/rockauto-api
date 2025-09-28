@@ -1,6 +1,7 @@
 """Part search result model for part number searches."""
 
 from typing import List
+
 from pydantic import BaseModel, Field
 
 from .part_info import PartInfo

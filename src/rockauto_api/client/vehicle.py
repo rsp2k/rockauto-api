@@ -1,8 +1,8 @@
 """Vehicle class for scoped RockAuto operations."""
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..models import Engine, VehiclePartCategories, VehiclePartsResult
 

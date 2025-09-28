@@ -1,7 +1,8 @@
 """Models for RockAuto order status functionality."""
 
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import List, Optional
+
 from pydantic import BaseModel, Field, field_validator
 
 

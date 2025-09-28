@@ -9,15 +9,34 @@ import httpx
 class BaseClient:
     """Base client with common HTTP functionality."""
 
-    def __init__(self):
-        """Initialize the base client with proper headers and session."""
+    def __init__(self, use_mobile_profile: bool = True):
+        """Initialize the base client with proper headers and session.
+
+        Args:
+            use_mobile_profile: If True, use mobile browser headers and behavior
+        """
         self.API_ENDPOINT = "https://www.rockauto.com/catalog/catalogapi.php"
         self.CATALOG_BASE = "https://www.rockauto.com/en/catalog"
+        self.use_mobile_profile = use_mobile_profile
 
-        # Create HTTP session with real desktop browser headers (based on Playwright analysis)
-        self.session = httpx.AsyncClient(
-            headers={
-                # Match real Chrome 139 browser signature from Playwright
+        # Choose headers based on profile type
+        if use_mobile_profile:
+            # Mobile Chrome headers - often trigger less aggressive anti-bot detection
+            headers = {
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+                "Cache-Control": "max-age=0"
+            }
+        else:
+            # Desktop Chrome headers (based on Playwright analysis)
+            headers = {
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                 "Accept-Language": "en-US,en;q=0.9",
@@ -31,7 +50,11 @@ class BaseClient:
                 "Sec-Fetch-User": "?1",
                 "Upgrade-Insecure-Requests": "1",
                 "Cache-Control": "max-age=0"
-            },
+            }
+
+        # Create HTTP session with chosen headers
+        self.session = httpx.AsyncClient(
+            headers=headers,
             timeout=30.0,
             follow_redirects=True,  # Handle 302 redirects automatically
             cookies=httpx.Cookies()  # Use httpx's built-in cookie jar
@@ -47,6 +70,10 @@ class BaseClient:
 
         # Keep backward compatibility with legacy cookies dict for troubleshooting
         self.cookies = dict(self.session.cookies)
+
+        # Navigation state tracking (critical for CAPTCHA bypass)
+        self.last_navigation_context: Optional[str] = None
+        self.current_year_context: Optional[str] = None
 
         # Authentication state
         self.is_authenticated = False
@@ -249,6 +276,95 @@ class BaseClient:
 
         except Exception as e:
             raise Exception(f"API request failed: {str(e)}")
+
+    async def _simulate_navigation_context(self, make: str = None, year: str = None) -> None:
+        """
+        Simulate browser navigation context to avoid CAPTCHA detection.
+
+        This method replicates the navnode_fetch calls that real browsers make
+        when navigating the vehicle hierarchy, which is critical for bypassing
+        anti-bot detection systems.
+        """
+        try:
+            # Update navigation cookies like a real browser
+            if make:
+                catalog_href = f"https://www.rockauto.com/en/catalog/{make.lower()}"
+                self.session.cookies.set("lastcathref", catalog_href, domain="www.rockauto.com")
+                self.last_navigation_context = catalog_href
+
+            if year:
+                self.session.cookies.set(f"year_{year}", "true", domain="www.rockauto.com")
+                self.current_year_context = year
+
+            # Send navnode_fetch request like real browsers do
+            if make:
+                navnode_payload = {
+                    "jsn": {
+                        "groupindex": "46",  # This varies, but 46 is common for makes
+                        "tab": "catalog",
+                        "make": make.upper(),
+                        "nodetype": "make",
+                        "jsdata": {
+                            "markets": [
+                                {"c": "US", "y": "Y", "i": "Y"},
+                                {"c": "CA", "y": "Y", "i": "Y"},
+                                {"c": "MX", "y": "Y", "i": "Y"}
+                            ],
+                            "mktlist": "US,CA,MX",
+                            "showForMarkets": {"US": True, "CA": True, "MX": True},
+                            "importanceByMarket": {"US": "Y", "CA": "Y", "MX": "Y"},
+                            "Show": 1
+                        },
+                        "label": make.upper(),
+                        "href": catalog_href,
+                        "labelset": True,
+                        "jump_to_after_expand": True,
+                        "dont_change_url": True,
+                        "has_more_auto_open_steps": True,
+                        "loaded": False,
+                        "expand_after_load": True,
+                        "fetching": True
+                    },
+                    "max_group_index": 363
+                }
+
+                # Make the navnode_fetch call with proper browser headers
+                nav_headers = {
+                    "Accept": "text/plain, */*; q=0.01",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Cache-Control": "no-cache",
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Origin": "https://www.rockauto.com",
+                    "Pragma": "no-cache",
+                    "Referer": catalog_href,
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-origin",
+                    "X-Requested-With": "XMLHttpRequest"
+                }
+
+                data = {
+                    "func": "navnode_fetch",
+                    "payload": json.dumps(navnode_payload),
+                    "api_json_request": "1",
+                    "sctchecked": "1",
+                    "scbeenloaded": "false",
+                    "curCartGroupID": "",
+                    # Note: _jnck parameter is a dynamic anti-bot token generated by
+                    # mobile JavaScript. Without this token, some requests may trigger CAPTCHA.
+                    # Real browsers generate this from mobilecatalogmainbelowfold.js
+                }
+
+                # Send the navigation simulation request
+                await self.session.post(self.API_ENDPOINT, data=data, headers=nav_headers)
+
+            # Update legacy cookies dict
+            self.cookies = dict(self.session.cookies)
+
+        except Exception as e:
+            # Don't fail the main request if navigation simulation fails
+            # but log the issue for debugging
+            pass
 
     async def __aenter__(self):
         """Async context manager entry."""
